@@ -39,6 +39,17 @@ equities/ETFs — as follows:
 4. **Execution**: no-trade buffer + volume-aware order sizing + a gross guard and
    an **exit sweep** that liquidates any name dropped from selection (so book
    gross can never breach the no-leverage cap).
+5. **Live-safety guards** (inert in a benign backtest — fire 0 times over the ~25-month
+   history; they are insurance for the single live month):
+   - **Catastrophic kill-switch**: if the drawdown from the running peak breaches
+     **−35%**, the book is liquidated to cash in one shot — an anti-elimination guard
+     for the terminal-return measurement. It is *binary and extreme*, so it never
+     sells into ordinary, recoverable dips (unlike gradual de-risk overlays, which we
+     tested and found net-negative).
+   - **Defensive data handling**: each symbol's fetch is wrapped so one bad feed can't
+     kill the step; symbols with too little live history are skipped (and logged); if
+     fewer than a handful of instruments are tradeable, the bot holds cash rather than
+     trade a degenerate universe.
 
 **Long/flat**: spot crypto cannot be shorted, so a bearish forecast parks capital
 in cash; equities carry a breadth-gated tactical short only in a risk-off regime.
@@ -49,7 +60,8 @@ in cash; equities carry a breadth-gated tactical short only in a risk-off regime
 data → volatility (EWMA σ%) → rules (forecasts ±20, soft-capped) →
 forecast combine (weights + FDM) → dynamic selection (top-N per class) →
 position sizing → portfolio (handcraft weights + full-deploy to 0.97 gross + long/flat) →
-execution (no-trade buffer + volume-aware sizing + exit sweep + no-leverage gross guard)
+execution (no-trade buffer + volume-aware sizing + exit sweep + no-leverage gross guard
+            + catastrophic kill-switch + defensive data handling)
 ```
 
 **Active forecast rules** (`strategies/engine/forecasts/`):
