@@ -22,17 +22,19 @@ harness runs end-to-end out of the box against the sample CSV in ``data/``.
 
 # Equity / spot tickers traded by the local backtest. Add your own symbols
 # here and drop the matching CSV files into ``data/``.
-STOCK_SLEEVE_SYMBOLS: list[str] = [
-    "EXAMPLE",
-]
+STOCK_SLEEVE_SYMBOLS: list[str] = []
 
 # Crypto tickers (quoted in USD). Leave empty if your strategy is stocks-only.
-CRYPTO_SLEEVE_SYMBOLS: list[str] = []
+# Populate matching CSVs with ``python research/download_ccxt.py``.
+CRYPTO_SLEEVE_SYMBOLS: list[str] = [
+    "BTC", "ETH", "SOL", "BNB", "XRP",
+    "ADA", "AVAX", "LINK", "LTC", "DOGE",
+]
 
 # Benchmark symbols. Used by Lumibot to render the comparison line on the
 # generated tearsheet HTML.
-STOCK_BENCH: str = "EXAMPLE"
-CRYPTO_BENCH: str = "EXAMPLE"
+STOCK_BENCH: str = "BTC"
+CRYPTO_BENCH: str = "BTC"
 
 # Derived set used by ``backtest.py`` to decide whether a loaded symbol
 # should be modelled as ``Asset.AssetType.CRYPTO`` vs ``STOCK``. Do not

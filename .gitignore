@@ -7,7 +7,11 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 
-# Local backtest artifacts (committed example CSVs are kept).
+# Local backtest data — large and regenerable via research/download_*.py.
+# The canonical template sample (EXAMPLE) stays committed.
+data/*_1m_spot.csv
+!data/EXAMPLE_1m_spot.csv
+data/daily/
 data/raw/
 data/*.parquet
 data/cache/

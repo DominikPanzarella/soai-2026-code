@@ -1,5 +1,12 @@
-lumibot
-python-dotenv
-pandas
-numpy
-scikit-learn
+# Runtime dependencies for the official evaluation (strategies/strategy.py).
+# Compatible lower-bound pins: over-pinning risks an install conflict in the
+# organizers' environment. Tested against the versions in the comments.
+lumibot>=4.5,<5        # 4.5.74
+pandas>=2.0,<3         # 2.3.3
+numpy>=1.26,<3         # 2.4.6
+
+# Local development only (research/download_*.py); not imported by the strategy
+# at runtime, kept here so a clean clone can fetch local backtest data.
+ccxt>=4.5              # 4.5.64  — crypto 1-min bars (research/download_ccxt.py)
+yfinance>=0.2          # daily multi-asset bars (research/download_daily.py)
+python-dotenv>=1.0     # 1.2.2

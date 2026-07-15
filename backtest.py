@@ -58,10 +58,15 @@ DATA_DIR = Path(__file__).resolve().parent / "data"
 BUDGET = 1_000_000
 
 # Backtest window (both bounds inclusive). Set either to ``None`` to defer
-# entirely to the date range available in your CSV files. Defaults align
-# with the official competition trading window (1-31 August 2026, SGT).
-BACKTEST_START: datetime | None = datetime(2026, 8, 1)
-BACKTEST_END: datetime | None = datetime(2026, 8, 29)
+# entirely to the date range available in your CSV files.
+#
+# NOTE: the official trading window (1-31 Aug 2026) is in the FUTURE, so for
+# local development we defer to whatever recent history our CSVs cover (pulled
+# via ``research/download_ccxt.py``). At 60M cadence, resampling deep minute
+# history each step is heavy, so the local Lumibot backtest is scoped to a short
+# smoke-test window; the multi-regime validation lives in research/robustness.py.
+BACKTEST_START: datetime | None = datetime(2026, 6, 20)
+BACKTEST_END: datetime | None = datetime(2026, 7, 10)
 
 # When True, the harness aborts if a symbol declared in ``params.py`` has
 # no matching CSV in ``DATA_DIR``. When False the symbol is skipped with a
@@ -83,8 +88,10 @@ BUY_FLAT_FEE = 0.0
 SELL_FLAT_FEE = 0.0
 
 # Fee as a fraction of trade notional. 0.0005 == 5 basis points.
-BUY_PERCENT_FEE = 0.0
-SELL_PERCENT_FEE = 0.0
+# 10 bps ≈ a realistic crypto taker fee; the official engine also layers
+# volume-aware slippage on top, so treat local P&L as an optimistic bound.
+BUY_PERCENT_FEE = 0.0010
+SELL_PERCENT_FEE = 0.0010
 
 # Per-contract fee (only relevant for options / futures).
 PER_CONTRACT_FEE = 0.0
@@ -229,9 +236,27 @@ def run_backtest() -> None:
             "Please align downloaded date ranges first."
         )
 
+    # Account settlement currency. For a crypto universe this MUST match the
+    # quote the data is registered with (Asset("USD", CRYPTO)); otherwise
+    # Lumibot books crypto trades into a parallel USD-crypto ledger that never
+    # rolls into portfolio_value (positions fill but PV stays flat).
+    has_crypto = bool(P.CRYPTO_SYMBOLS)
+    quote_asset = Asset(symbol="USD",
+                        asset_type=Asset.AssetType.CRYPTO if has_crypto
+                        else Asset.AssetType.FOREX)
+
+    # Benchmark as a typed Asset so a crypto benchmark resolves against the
+    # loaded pandas_data instead of being treated as a (missing) stock.
+    bench_is_crypto = P.STOCK_BENCH in P.CRYPTO_SYMBOLS
+    benchmark_asset = Asset(
+        symbol=P.STOCK_BENCH,
+        asset_type=Asset.AssetType.CRYPTO if bench_is_crypto else Asset.AssetType.STOCK,
+    )
+
     print(
         f"[INFO] Loaded {len(pandas_data)} assets from {DATA_DIR}\n"
-        f"[INFO] Backtest window: {backtesting_start} -> {backtesting_end}"
+        f"[INFO] Backtest window: {backtesting_start} -> {backtesting_end}\n"
+        f"[INFO] Quote asset: {quote_asset}  Benchmark: {benchmark_asset}"
     )
 
     Strategy.run_backtest(
@@ -240,7 +265,8 @@ def run_backtest() -> None:
         backtesting_end,
         pandas_data=pandas_data,
         budget=BUDGET,
-        benchmark_asset=P.STOCK_BENCH,
+        quote_asset=quote_asset,
+        benchmark_asset=benchmark_asset,
         **_execution_cost_kwargs(),
     )
 
