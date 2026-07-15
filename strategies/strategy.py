@@ -114,10 +114,21 @@ class Strategy(_LumibotStrategy):
         min_bars = max(50, cfg.risk.vol_span, cfg.ewmac.pairs[-1][1] // 2)
 
         # ── 1) data + volatility (core universe) ──────────────────────────
+        # Defensive at go-live: a symbol whose live feed returns too few bars is
+        # SKIPPED (never traded under-warmed) rather than crashing the step; if the
+        # feed under-supplies broadly, we log it and hold cash instead of trading a
+        # degenerate universe.
         closes, volumes, prices, ann_vol = {}, {}, {}, {}
+        skipped = 0
         for sym, ins in self.instruments.items():
-            close, vol = data.series_for_cadence(self, self.assets[sym], cfg, self.quotes[sym])
-            if len(close) < min_bars:
+            try:
+                close, vol = data.series_for_cadence(self, self.assets[sym], cfg, self.quotes[sym])
+            except Exception as exc:  # noqa: BLE001 — one bad symbol must not kill the step
+                self.log_message(f"[data] {sym} fetch error: {exc}")
+                skipped += 1
+                continue
+            if close is None or len(close) < min_bars:
+                skipped += 1
                 continue
             closes[sym] = close
             volumes[sym] = vol
@@ -126,7 +137,12 @@ class Strategy(_LumibotStrategy):
             bpy = cfg.bars_per_year(ins.is_crypto)
             ann_vol[sym] = (volatility.annualise(per_bar, bpy)
                             if per_bar > 0 else cfg.risk.vol_floor_annual)
-        if not closes:
+        if skipped:
+            self.log_message(f"[data] {len(closes)}/{len(self.instruments)} instruments ready; "
+                             f"{skipped} skipped (feed short of {min_bars} bars)")
+        if len(closes) < cfg.risk.min_tradeable:
+            self.log_message(f"[data] only {len(closes)} instrument(s) tradeable "
+                             f"(< {cfg.risk.min_tradeable}) — holding cash this bar")
             return
 
         # ── 2) class-aware cross-sectional rules (whole basket) ───────────
@@ -249,6 +265,13 @@ class Strategy(_LumibotStrategy):
         risk_scalar = regime_mult * dd_mult
         if risk_scalar < 1.0:
             tgt = {s: w * risk_scalar for s, w in tgt.items()}
+        # HARD catastrophic kill-switch: in a true disaster, liquidate everything to cash
+        # (one-shot) so a blow-up can't reach the terminal-measurement day. Fires only far
+        # below the normal operating range, so it never touches ordinary recoverable dips.
+        if self._peak_pv > 0 and dd <= -cfg.risk.dd_kill:
+            self.log_message(f"[KILL-SWITCH] drawdown {dd:+.1%} ≤ -{cfg.risk.dd_kill:.0%} "
+                             f"→ liquidating to cash")
+            tgt = {s: 0.0 for s in tgt}
 
         # ── 5) execution (buffer + volume cap + no-leverage gross guard) ──
         max_gross = cfg.risk.gross_cap - cfg.risk.cash_buffer

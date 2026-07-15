@@ -263,6 +263,14 @@ class RiskConfig:
     dd0: float = 0.30
     dd_max: float = 0.50
     dd_min: float = 0.40
+    # HARD catastrophic kill-switch: below this drawdown from the running peak, fully
+    # liquidate to cash (one-shot) — anti-elimination guard for the single-month terminal
+    # measurement. Distinct from the gradual floor above: binary, fires only in a true
+    # disaster, so it can't "sell low then drag the recovery" across ordinary dips.
+    dd_kill: float = 0.35
+    # Data-safety guard: if fewer than this many instruments have enough live history,
+    # hold cash instead of trading a degenerate universe.
+    min_tradeable: int = 5
 
 
 @dataclass
