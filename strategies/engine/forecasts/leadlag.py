@@ -14,6 +14,7 @@ on 60M.
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from ..config import LeadLagConfig
@@ -23,7 +24,10 @@ def leadlag_forecast(prices_by_symbol: dict[str, pd.Series], cfg: LeadLagConfig,
                      cap: float = 20.0, groups: dict[str, str] | None = None
                      ) -> dict[str, pd.Series]:
     syms = [s for s, p in prices_by_symbol.items() if p is not None and len(p)]
-    out = {s: pd.Series(0.0, index=prices_by_symbol[s].index)
+    # Default NaN (not 0.0): this rule only applies to the leader's cluster (crypto);
+    # out-of-scope names must be SKIPPED by combine_forecasts, not counted as a 0 vote
+    # (a finite 0 would enter the FDM denominator and dampen every equity forecast).
+    out = {s: pd.Series(np.nan, index=prices_by_symbol[s].index)
            for s in prices_by_symbol if prices_by_symbol[s] is not None}
     if cfg.leader not in syms or len(syms) < 2:
         return out
@@ -39,6 +43,6 @@ def leadlag_forecast(prices_by_symbol: dict[str, pd.Series], cfg: LeadLagConfig,
     rank = gap.rank(axis=1, pct=True)
     f = (cfg.scalar * (2.0 * rank - 1.0)).clip(0.0, cap)
     f = f.where(lead > 0, 0.0)                        # only when leader is up
-    for s in members:
+    for s in members:                                    # crypto members get a real 0/+ signal
         out[s] = f[s].reindex(out[s].index).fillna(0.0) if s in out else f[s]
-    return out
+    return out                                            # non-members stay NaN → skipped by combine

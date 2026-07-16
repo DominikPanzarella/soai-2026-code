@@ -254,24 +254,32 @@ class Strategy(_LumibotStrategy):
         for s, w in sleeve.items():
             tgt[s] = tgt.get(s, 0.0) + w
 
-        # ── 4c) tournament risk scaling: vol-conditioned regime × survival floor ─
-        pv_now = self.get_portfolio_value() or 0.0
-        self._peak_pv = max(self._peak_pv, pv_now)
-        dd = (pv_now / self._peak_pv - 1.0) if self._peak_pv > 0 else 0.0
-        regime_mult = regime_gross_scalar(closes, cfg.risk.regime_target_vol,
-                                          cfg.risk.regime_lo, cfg.risk.regime_vol_span,
-                                          cfg.bars_per_year(True))
-        dd_mult = drawdown_scalar(dd, cfg.risk.dd0, cfg.risk.dd_max, cfg.risk.dd_min)
-        risk_scalar = regime_mult * dd_mult
-        if risk_scalar < 1.0:
-            tgt = {s: w * risk_scalar for s, w in tgt.items()}
-        # HARD catastrophic kill-switch: in a true disaster, liquidate everything to cash
-        # (one-shot) so a blow-up can't reach the terminal-measurement day. Fires only far
-        # below the normal operating range, so it never touches ordinary recoverable dips.
-        if self._peak_pv > 0 and dd <= -cfg.risk.dd_kill:
-            self.log_message(f"[KILL-SWITCH] drawdown {dd:+.1%} ≤ -{cfg.risk.dd_kill:.0%} "
-                             f"→ liquidating to cash")
-            tgt = {s: 0.0 for s in tgt}
+        # ── 4c) tournament risk scaling + catastrophic kill-switch ──────────
+        # Act ONLY on a VALID portfolio-value read. Lumibot's get_portfolio_value()
+        # returns None on a transient broker-refresh failure; NEVER coerce that to 0
+        # (it would fabricate a -100% drawdown and misfire the kill-switch). A bad read
+        # → skip risk-scaling & kill-switch this bar and hold.
+        pv_now = self.get_portfolio_value()
+        if pv_now and pv_now > 0:
+            self._peak_pv = max(self._peak_pv, pv_now)
+            dd = pv_now / self._peak_pv - 1.0
+            # HARD catastrophic kill-switch: in a true disaster liquidate EVERYTHING to
+            # cash NOW via Lumibot sell_all — this bypasses the no-trade buffer and the
+            # per-bar turnover cap (which would otherwise leave the book exposed for days)
+            # — then stop for the bar. Fires only far below the normal operating range.
+            if dd <= -cfg.risk.dd_kill:
+                self.log_message(f"[KILL-SWITCH] drawdown {dd:+.1%} ≤ -{cfg.risk.dd_kill:.0%} "
+                                 f"→ liquidating to cash (sell_all)")
+                self.sell_all(cancel_open_orders=True)
+                return
+            # gradual survival floor (+ neutralised regime scalar) on the way down
+            regime_mult = regime_gross_scalar(closes, cfg.risk.regime_target_vol,
+                                              cfg.risk.regime_lo, cfg.risk.regime_vol_span,
+                                              cfg.bars_per_year(True))
+            dd_mult = drawdown_scalar(dd, cfg.risk.dd0, cfg.risk.dd_max, cfg.risk.dd_min)
+            risk_scalar = regime_mult * dd_mult
+            if risk_scalar < 1.0:
+                tgt = {s: w * risk_scalar for s, w in tgt.items()}
 
         # ── 5) execution (buffer + volume cap + no-leverage gross guard) ──
         max_gross = cfg.risk.gross_cap - cfg.risk.cash_buffer
